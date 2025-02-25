@@ -1,71 +1,94 @@
+import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
+import plotly.express as px
 import numpy as np
-import matplotlib.dates as mdates
 import statsmodels.api as sm
-from datetime import datetime
 
-def pace_to_seconds(pace):
-    """Convert pace from mm:ss to total seconds"""
-    minutes, seconds = map(int, pace.split(':'))
-    return minutes * 60 + seconds
+# Fonction pour convertir une durée (hh:mm:ss ou mm:ss) en secondes
+def time_to_seconds(time_str):
+    """Convertit une durée au format H:M:S ou M:S en secondes."""
+    if isinstance(time_str, str):
+        parts = list(map(int, time_str.split(":")))
+        return sum(x * 60**i for i, x in enumerate(reversed(parts)))
+    return time_str
 
+# Charger les données en tenant compte du séparateur ";"
+@st.cache_data
+def load_data():
+    df = pd.read_csv("/Users/Bruns/Downloads/running_data.csv", encoding="utf-8", sep=";")
+    df.columns = df.columns.str.strip()  # Supprime les espaces autour des noms de colonnes
+    
+    # Convertir la colonne "Date" au format datetime
+    df["Date"] = pd.to_datetime(df["Date"], format="%d/%m/%Y")
+
+    # Convertir l'allure en secondes/km
+    df["Allure (s/km)"] = df["Allure (min/km)"].apply(time_to_seconds)
+    
+    return df
+
+data = load_data()
+
+
+
+# 🔹 Gestion des données via session_state
+if "run_data" not in st.session_state:
+    st.session_state.run_data = data.copy()
+
+data = st.session_state.run_data
+data["Date_num"] = (data["Date"] - data["Date"].min()).dt.days  
+
+# 🔹 Régression linéaire globale
+X = sm.add_constant(data["Date_num"])
+y = data["Allure (s/km)"]  # ✅ Correction ici
+model = sm.OLS(y, X).fit()
+data["Regression"] = model.predict(X)
+
+# 🔹 Définition des ticks Y pour lisibilité
+min_pace = data["Allure (s/km)"].min()
+max_pace = data["Allure (s/km)"].max()
+tick_range = np.arange(int(min_pace), int(max_pace) + 1, 10)  # Ticks toutes les 10s
+
+# Fonction inverse pour afficher en min/km
 def seconds_to_pace(seconds):
-    """Convert total seconds to mm:ss pace format"""
     minutes = seconds // 60
-    seconds = seconds % 60
-    return f"{int(minutes)}:{int(seconds):02d}"
+    sec = seconds % 60
+    return f"{int(minutes)}:{int(sec):02d}"
 
-data = pd.read_csv("running_data.csv")  # Charger les données depuis un fichier CSV
+tick_labels = [seconds_to_pace(t) for t in tick_range]
 
-data['Date'] = pd.to_datetime(data['Date'], format='%d/%m/%Y')
-data['Pace (s/km)'] = data['Pace (min/km)'].apply(pace_to_seconds)
+# 📊 **Graphique 1 : Évolution avec régression**
+fig1 = px.scatter(data, x="Date", y="Allure (s/km)", trendline="ols",
+                  title="📉 Évolution de l'allure moyenne",
+                  labels={"Allure (s/km)": "Allure (mm:ss/km)"})
 
-def plot_regression(ax, x, y, color='black'):
-    """Ajoute une régression linéaire au graphique"""
-    x_num = mdates.date2num(x)
-    X = sm.add_constant(x_num)
-    model = sm.OLS(y, X).fit()
-    ax.plot(x, model.predict(X), color=color, linestyle='dashed', linewidth=2)
+fig1.update_yaxes(tickvals=tick_range, ticktext=tick_labels)
+fig1.update_xaxes(tickangle=-45)
 
-plt.figure(figsize=(18, 12))
+st.plotly_chart(fig1)
 
-# 1 - Scatter plot avec régression globale
-ax1 = plt.subplot(3, 1, 1)
-sns.scatterplot(x='Date', y='Pace (s/km)', data=data, ax=ax1, color='blue')
-plot_regression(ax1, data['Date'], data['Pace (s/km)'])
-ax1.set_title("Évolution de l'allure moyenne dans le temps")
-ax1.set_ylabel("Allure (min/km)")
-ax1.set_xlabel("Date")
-ax1.xaxis.set_major_formatter(mdates.DateFormatter('%d-%m'))
-ax1.set_yticks(range(int(min(data['Pace (s/km)'])), int(max(data['Pace (s/km)'])), 10))
-ax1.set_yticklabels([seconds_to_pace(t) for t in ax1.get_yticks()])
-plt.xticks(rotation=45)
+# 📊 **Graphique 2 : Évolution avec taille = distance et couleur = catégorie**
+fig2 = px.scatter(data, x="Date", y="Allure (s/km)", size="Distance (km)", color="Catégorie",
+                  title="📉 Évolution de l'allure (taille = distance, couleur = catégorie)",
+                  labels={"Allure (s/km)": "Allure (mm:ss/km)"})
 
-# 2 - Scatter plot avec taille = distance, couleur = Length, régression globale
-ax2 = plt.subplot(3, 1, 2)
-sns.scatterplot(x='Date', y='Pace (s/km)', size='Distance (km)', hue='Length', data=data, ax=ax2, sizes=(20, 200))
-plot_regression(ax2, data['Date'], data['Pace (s/km)'])
-ax2.set_title("Évolution de l'allure avec distance et type de course")
-ax2.set_ylabel("Allure (min/km)")
-ax2.set_xlabel("Date")
-ax2.xaxis.set_major_formatter(mdates.DateFormatter('%d-%m'))
-ax2.set_yticks(range(int(min(data['Pace (s/km)'])), int(max(data['Pace (s/km)'])), 10))
-ax2.set_yticklabels([seconds_to_pace(t) for t in ax2.get_yticks()])
-plt.xticks(rotation=45)
+# Ajout de la **ligne de régression unique**
+fig2.add_scatter(x=data["Date"], y=data["Regression"], mode="lines", name="Tendance", line=dict(color="black"))
 
-# 3 - Scatter plot avec taille = distance, couleur = fréquence cardiaque moyenne
-ax3 = plt.subplot(3, 1, 3)
-sns.scatterplot(x='Date', y='Pace (s/km)', size='Distance (km)', hue='FC (bpm avg)', data=data, ax=ax3, sizes=(20, 200), palette='RdYlGn_r')
-plot_regression(ax3, data['Date'], data['Pace (s/km)'])
-ax3.set_title("Évolution de l'allure avec fréquence cardiaque")
-ax3.set_ylabel("Allure (min/km)")
-ax3.set_xlabel("Date")
-ax3.xaxis.set_major_formatter(mdates.DateFormatter('%d-%m'))
-ax3.set_yticks(range(int(min(data['Pace (s/km)'])), int(max(data['Pace (s/km)'])), 10))
-ax3.set_yticklabels([seconds_to_pace(t) for t in ax3.get_yticks()])
-plt.xticks(rotation=45)
+fig2.update_yaxes(tickvals=tick_range, ticktext=tick_labels)
+fig2.update_xaxes(tickangle=-45)
 
-plt.tight_layout()
-plt.show()
+st.plotly_chart(fig2)
+
+# 📊 **Graphique 3 : Évolution avec taille = distance et couleur = fréquence cardiaque**
+fig3 = px.scatter(data, x="Date", y="Allure (s/km)", size="Distance (km)", color="FC (bpm avg)", 
+                  color_continuous_scale="RdYlGn_r",  # Rouge = FC haute, Vert = FC basse
+                  title="📉 Évolution de l'allure (taille = distance, couleur = FC)",
+                  labels={"Allure (s/km)": "Allure (mm:ss/km)"})
+
+fig3.add_scatter(x=data["Date"], y=data["Regression"], mode="lines", name="Tendance", line=dict(color="black"))
+
+fig3.update_yaxes(tickvals=tick_range, ticktext=tick_labels)
+fig3.update_xaxes(tickangle=-45)
+
+st.plotly_chart(fig3)
+
