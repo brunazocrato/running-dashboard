@@ -28,11 +28,48 @@ def load_data():
 
 data = load_data()
 
-
-
 # 🔹 Gestion des données via session_state
 if "run_data" not in st.session_state:
     st.session_state.run_data = data.copy()
+
+# 🔹 Sidebar Form for Adding a New Run
+st.sidebar.title("🏃 Ajouter une nouvelle course")
+with st.sidebar.form("add_run_form"):
+    new_date = st.date_input("📅 Date", value=pd.to_datetime("today"))
+    new_duration = st.text_input("⏳ Durée (hh:mm:ss ou mm:ss)", "00:30:00")
+    new_distance = st.number_input("📏 Distance (km)", min_value=0.1, step=0.1)
+    new_pace = st.text_input("⏱️ Allure (mm:ss/km)", "05:30")
+    new_best_km = st.text_input("🏅 Best Km (mm:ss)", "04:50")
+    new_fc = st.number_input("❤️ FC (bpm avg)", min_value=40, max_value=220, step=1)
+    new_category = st.selectbox("🏷️ Catégorie", ["Easy", "Tempo", "Interval", "Long Run"])
+    
+    submitted = st.form_submit_button("➕ Ajouter")
+
+    if submitted:
+        # Convert time fields to seconds
+        new_entry = pd.DataFrame({
+            "Date": [new_date.strftime("%d/%m/%Y")],  # Keep as string to match CSV format
+            "Durée": [new_duration],
+            "Distance (km)": [new_distance],
+            "Allure (min/km)": [new_pace],
+            "Best Km": [new_best_km],
+            "FC (bpm avg)": [new_fc],
+            "Catégorie": [new_category]
+        })
+        
+        # Append new data to CSV
+        new_entry.to_csv(CSV_FILE, mode="a", header=not os.path.exists(CSV_FILE), index=False, sep=";")
+        
+        # Update session state and reload data
+        st.session_state.run_data = pd.concat([st.session_state.run_data, new_entry], ignore_index=True)
+        st.success("✅ Nouvelle course ajoutée et sauvegardée dans le fichier CSV !")
+
+# Reload the updated data
+data = st.session_state.run_data
+data["Date"] = pd.to_datetime(data["Date"], format="%d/%m/%Y")
+data["Allure (s/km)"] = data["Allure (min/km)"].apply(time_to_seconds)
+data["Date_num"] = (data["Date"] - data["Date"].min()).dt.days  
+
 
 data = st.session_state.run_data
 data["Date_num"] = (data["Date"] - data["Date"].min()).dt.days  
