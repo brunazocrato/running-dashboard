@@ -15,7 +15,7 @@ def time_to_seconds(time_str):
 # Charger les données en tenant compte du séparateur ";"
 @st.cache_data
 def load_data():
-    df = pd.read_csv("/Users/Bruns/Downloads/running_data.csv", encoding="utf-8", sep=";")
+    df = pd.read_csv("running_data.csv", encoding="utf-8", sep=";")
     df.columns = df.columns.str.strip()  # Supprime les espaces autour des noms de colonnes
     
     # Convertir la colonne "Date" au format datetime
